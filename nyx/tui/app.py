@@ -1496,11 +1496,13 @@ class NyxApp(App):
         self._update_status()
         # Update thinking indicator only while waiting for first token.
         if self._thinking and self._stream_widget is not None:
+            suffix = " [code mode]" if self._code_mode else ""
             self._stream_widget.update(
                 Text.assemble(
                     Text("\n"),
                     Text("☾ ", style="cyan"),
                     Text("NYX", style="bold cyan"),
+                    Text(suffix, style="dim"),
                     Text("\n"),
                     Text("  thinking ", style="dim"),
                     Text(self._spinner_chars[self._spinner_idx], style="cyan"),
@@ -1517,11 +1519,13 @@ class NyxApp(App):
 
         # Show thinking indicator.
         self._thinking = True
+        suffix = " [code mode]" if self._code_mode else ""
         self._stream_widget = self._add_message(
             Text.assemble(
                 Text("\n"),
                 Text("☾ ", style="cyan"),
                 Text("NYX", style="bold cyan"),
+                Text(suffix, style="dim"),
                 Text("\n"),
                 Text("  thinking ", style="dim"),
                 Text(self._spinner_chars[self._spinner_idx], style="cyan"),
