@@ -13,9 +13,8 @@
 
 ### Nope not your agent, YOU CODE it yourself, use me as your guide.
 
-A minimal streaming chatbot harness for local Ollama models.
-Relying too heavily on massive models is going to bite us in the ass sooner or later. 
-Here's a lightweight harness that turns a 2B-parameter model into something genuinely useful for coding tasks.
+This is a harness built to help you in understanding syntax, the programming language, and how it works.
+It automatically pulls docsets from [DevDocs](https://devdocs.io) and uses Ollama local model of your choice to act as a smart documentation guide to help you code.
 
 </div>
 
@@ -64,7 +63,7 @@ downloaded from [DevDocs](https://devdocs.io) and cached locally under
 /docs install go
 ```
 
-**Browse:**
+**Browse Docs:**
 
 ```
 /docs python~3.12
@@ -77,25 +76,21 @@ This opens a full-screen modal with two states:
 2. **Reading** — the page renders as formatted markdown with syntax
    highlighting. Scroll with arrow keys or mouse wheel.
 
-**Feed to AI** — the core workflow. While reading a doc page:
+**Feed to AI** — this feeds to the AI your selected context from the doc page. While reading a doc page:
 
-- **Mouse drag** to select a snippet
+- **Select any Context** to highlight your selected context
 - Press **`a`** to send the selected text to the chat as context, then ask
-  a question about it
-- No selection? You'll get a prompt to select first
-- **`/followup <question>`** re-injects the last doc page and asks again
+  a question about it!
+- Use **`/followup <question>`** to re-injects the last docs context to the AI and asks a follow-up question.
 
-Pages use a virtualized renderer — only visible lines are drawn, so
-1000+ line docs scroll without lag.
 
 **Manage docsets:**
-
 ```
 /docs list              — show installed docsets
 /docs available [query] — browse downloadable docsets
 ```
 
-**While in the browser:**
+**While in the docs browser:**
 
 | Key | Action |
 |-----|--------|
