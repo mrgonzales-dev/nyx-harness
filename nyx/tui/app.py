@@ -40,6 +40,7 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("code",        "toggle code-only mode",         "cmd_code"),
     ("docs",        "browse/install docsets",        "cmd_docs"),
     ("followup",    "re-inject last doc and ask",    "cmd_followup"),
+    ("cls",         "clear screen",                   "cmd_cls"),
     ("clear",       "clear conversation history",    "cmd_clear"),
     ("compact",     "manually compact conversation", "cmd_compact"),
     ("context",     "show context usage breakdown",  "cmd_context"),
@@ -1298,6 +1299,12 @@ class NyxApp(App):
         self._doc_entry_name = None
         self._doc_full_markdown = ""
         self._doc_full_tokens = 0
+
+    def cmd_cls(self, _arg: str) -> None:
+        """Clear the screen — remove all chat messages from view."""
+        chat = self.query_one("#chat-history", VerticalScroll)
+        chat.remove_children()
+        self._add_system("screen cleared")
 
     def cmd_clear(self, _arg: str) -> None:
         self.convo.reset()
