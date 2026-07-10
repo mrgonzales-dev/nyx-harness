@@ -1,0 +1,22 @@
+[project]
+name = "nyx-harness"
+version = "0.1.0"
+description = "A minimal streaming chatbot harness for local Ollama models"
+requires-python = ">=3.11"
+dependencies = [
+    "ollama>=0.4.0",
+    "httpx>=0.27.0",
+    "rich>=13.0.0",
+    "textual>=1.0.0",
+    "markdownify>=1.0.0",
+]
+
+[project.scripts]
+nyx-harness = "nyx.__main__:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nyx"]

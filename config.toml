@@ -1,0 +1,7 @@
+model = "qwen2.5-coder:1.5b"
+max_history_turns = 12
+temperature = 0.4
+context_limit = 4096
+compact_to = 1500
+keep_recent_turns = 4
+request_timeout = 300
