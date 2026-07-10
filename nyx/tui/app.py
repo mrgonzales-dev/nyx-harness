@@ -37,6 +37,7 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("model",       "switch model",                 "cmd_model"),
     ("models",      "list available models",         "cmd_models"),
     ("system",      "set system prompt",             "cmd_system"),
+    ("code",        "toggle code-only mode",         "cmd_code"),
     ("docs",        "browse/install docsets",        "cmd_docs"),
     ("followup",    "re-inject last doc and ask",    "cmd_followup"),
     ("clear",       "clear conversation history",    "cmd_clear"),
@@ -50,6 +51,14 @@ COMMANDS: list[tuple[str, str, str]] = [
 
 # Models that use thinking/CoT output.
 THINKING_KWS = frozenset({"thinking", "deepseek-r1", "qwq", "reasoner"})
+
+# System prompt appended when /code mode is active.
+CODE_MODE_PROMPT = (
+    "\n\n[code mode]\n"
+    "Output ONLY code. No explanations, no commentary, no markdown wrapping "
+    "around the code. Use markdown code fences (```) to delimit code blocks. "
+    "If there are multiple blocks, output each in its own fence."
+)
 
 
 class ModelSwitchModal(ModalScreen[str]):
@@ -421,6 +430,11 @@ class NyxApp(App):
         self._thinking = False
         self._auto_scroll = True
 
+        # Code mode — strips response to code blocks only.
+        self._code_mode: bool = False
+        self._original_temperature: float = self.config.temperature
+        self._code_system_saved: str | None = None
+
         # Fetch the model's actual context window from Ollama.
         self._model_ctx: int | None = None
         self._refresh_model_ctx()
@@ -539,7 +553,7 @@ class NyxApp(App):
         # Load ASCII logo.
         logo_path = Path(__file__).parent.parent / "assets" / "logo.txt"
         if logo_path.exists():
-            logo_text = logo_path.read_text()
+            logo_text = logo_path.read_text(encoding="utf-8")
             self.query_one("#logo-text", Static).update(
                 Text(logo_text, style="bold cyan", justify="center"),
             )
@@ -820,7 +834,49 @@ class NyxApp(App):
             self._add_system("usage: /system <prompt text>")
             return
         self.convo.set_system(arg)
+        self._code_system_saved = arg if self._code_mode else self._code_system_saved
+        if self._code_mode:
+            self._apply_code_system()
         self._add_system("system prompt updated")
+
+    def _code_on(self) -> None:
+        """Activate code mode."""
+        self._code_mode = True
+        # Save state for clean restore.
+        self._code_system_saved = self.config.effective_system
+        self._original_temperature = self.config.temperature
+        # Apply code-mode system prompt.
+        self._apply_code_system()
+        # Force deterministic output.
+        self.config.temperature = 0.0
+        self.notify("code mode ON — temperature set to 0.0", timeout=2)
+        self._update_status()
+
+    def _code_off(self) -> None:
+        """Deactivate code mode."""
+        self._code_mode = False
+        # Restore original system prompt.
+        if self._code_system_saved is not None:
+            self.convo.set_system(self._code_system_saved)
+            self._code_system_saved = None
+        # Restore original temperature.
+        self.config.temperature = self._original_temperature
+        self.notify("code mode OFF", timeout=2)
+        self._update_status()
+
+    def _apply_code_system(self) -> None:
+        """Layer the code-mode instruction on top of the saved system prompt."""
+        base = self._code_system_saved or self.config.effective_system
+        self.convo.set_system(base + CODE_MODE_PROMPT)
+
+    def cmd_code(self, arg: str) -> None:
+        """Toggle code-only mode."""
+        if self._is_streaming:
+            return
+        if self._code_mode:
+            self._code_off()
+        else:
+            self._code_on()
 
     def cmd_docs(self, arg: str) -> None:
         """Browse and manage docsets."""
@@ -1227,6 +1283,8 @@ class NyxApp(App):
         if self._doc_in_context:
             doc_part = Text(f"  docs: {self._doc_full_tokens}", style="magenta")
             status = Text.assemble(status, doc_part)
+        if self._code_mode:
+            status = Text.assemble(status, Text("  code", style="bold cyan"))
         dots = self._spinner_chars[self._spinner_idx]
         status = Text.assemble(
             Text(f"{dots}  ", style="cyan"),
@@ -1330,12 +1388,15 @@ class NyxApp(App):
         full_text = current_text
         result = result_holder[0]
 
+        # In code mode, strip to code blocks for context and display.
+        store_text = self._extract_code_blocks(full_text) if self._code_mode else full_text
+
         # Update conversation state.
-        self.convo.add_assistant(full_text)
+        self.convo.add_assistant(store_text)
         if result:
             self.convo.update_exact_tokens(result.prompt_tokens)
 
-        self._finalize_response(full_text, my_gen)
+        self._finalize_response(store_text, my_gen)
         self._update_status()
 
         # Auto-remove doc from context after the response (keep metadata for /followup).
@@ -1348,14 +1409,54 @@ class NyxApp(App):
                 )
                 self._update_status()
 
-    def _assistant_text(self, text: str) -> Text:
-        """Build the assistant message content: header + markdown body."""
-        chat = self.query_one("#chat-history", VerticalScroll)
-        width = chat.content_size.width or 80
+    @staticmethod
+    def _extract_code_blocks(text: str) -> str:
+        """Extract all markdown fenced code blocks (including fences).
+
+        Handles partial fences during streaming — an opening fence without
+        a matching close is captured as partial content.
+        """
+        parts: list[str] = []
+        i = 0
+        while True:
+            start = text.find("```", i)
+            if start == -1:
+                break
+            nl_after = text.find("\n", start)
+            if nl_after == -1:
+                # Opening fence line not complete — still accumulating.
+                break
+            close = text.find("```", nl_after + 1)
+            if close == -1:
+                # No closing fence yet — capture partial (live streaming).
+                parts.append(text[start:])
+                break
+            parts.append(text[start : close + 3])
+            i = close + 3
+        return "\n\n".join(parts)
+
+    def _assistant_code_text(self, text: str) -> Text:
+        """Render code-blocks-only text during streaming (no markdown)."""
         return Text.assemble(
             Text("\n"),
             Text("☾ ", style="cyan"),
             Text("NYX", style="bold cyan"),
+            Text(" [code]", style="dim"),
+            Text("\n\n"),
+            Text(text, style="dim"),
+            Text("\n"),
+        )
+
+    def _assistant_text(self, text: str) -> Text:
+        """Build the assistant message content: header + markdown body."""
+        chat = self.query_one("#chat-history", VerticalScroll)
+        width = chat.content_size.width or 80
+        header_suffix = " [code]" if self._code_mode else ""
+        return Text.assemble(
+            Text("\n"),
+            Text("☾ ", style="cyan"),
+            Text("NYX", style="bold cyan"),
+            Text(header_suffix, style="dim"),
             Text("\n\n"),
             render_markdown(text, width),
             Text("\n"),
@@ -1364,9 +1465,16 @@ class NyxApp(App):
     def _update_response(self, text: str, gen: int | None = None) -> None:
         if gen is not None and self._active_gen is not gen:
             return
-        self._thinking = False
         if self._stream_widget is not None:
-            self._stream_widget.update(self._assistant_text(text))
+            if self._code_mode:
+                code_text = self._extract_code_blocks(text)
+                if not code_text:
+                    return  # Keep thinking indicator until code arrives.
+                self._thinking = False
+                self._stream_widget.update(self._assistant_code_text(code_text))
+            else:
+                self._thinking = False
+                self._stream_widget.update(self._assistant_text(text))
             if self._auto_scroll:
                 chat = self.query_one("#chat-history", VerticalScroll)
                 chat.scroll_end(animate=False)
