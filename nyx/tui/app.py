@@ -20,7 +20,7 @@ from textual.containers import Container, VerticalScroll
 from textual.screen import ModalScreen
 from textual.suggester import Suggester
 from textual.theme import Theme
-from textual.widgets import Input as _Input, ListView, ListItem, Static
+from textual.widgets import Button, Input as _Input, ListView, ListItem, Static
 
 from nyx.core.chat import Conversation, estimate_messages_tokens, estimate_tokens
 from nyx.core.client import OllamaClient
@@ -59,6 +59,177 @@ CODE_MODE_PROMPT = (
     "around the code. Use markdown code fences (```) to delimit code blocks. "
     "If there are multiple blocks, output each in its own fence."
 )
+
+
+class MissingModelModal(ModalScreen[str]):
+    """Modal shown when the default model is not available on Ollama.
+
+    Dismisses with:
+        - model name (str): user downloaded or picked a model
+        - ``"pick"``:        user wants to pick from the model list
+        - ``""``:            user chose to continue without a model
+        - ``None``:          user closed the modal (app should exit)
+    """
+
+    def __init__(self, has_models: bool) -> None:
+        super().__init__()
+        self._has_models = has_models
+        self._cancel = False
+
+    CSS = """
+    MissingModelModal {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    MissingModelModal > Container {
+        width: 54;
+        max-height: 24;
+        background: $surface;
+        border: solid cyan;
+        padding: 1 2;
+    }
+
+    #modal-header {
+        color: cyan;
+        text-style: bold;
+        text-align: center;
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #modal-body {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .option-btn {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #progress-text {
+        height: auto;
+        margin: 1 0;
+        text-align: center;
+        width: 100%;
+        display: none;
+    }
+
+    #cancel-btn {
+        width: 100%;
+        display: none;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Static("Model not found", id="modal-header")
+            yield Static(
+                "The default model qwen2.5-coder:1.5b\n"
+                "is not available on Ollama.\n\n"
+                "It's optimised for lower-end devices.",
+                id="modal-body",
+            )
+            yield Button(
+                "Download qwen2.5-coder:1.5b",
+                id="download-btn",
+                classes="option-btn",
+            )
+            yield Button(
+                "Pick a different model",
+                id="pick-btn",
+                classes="option-btn",
+            )
+            if self._has_models:
+                yield Button(
+                    "Continue without a model",
+                    id="continue-btn",
+                    classes="option-btn",
+                )
+            yield Static("", id="progress-text")
+            yield Button("Cancel", id="cancel-btn")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "download-btn":
+            self._start_download()
+        elif btn_id == "pick-btn":
+            self.dismiss("pick")
+        elif btn_id == "continue-btn":
+            self.dismiss("")
+        elif btn_id == "cancel-btn":
+            self._cancel = True
+
+    def _start_download(self) -> None:
+        """Hide options, show progress view, start the pull worker."""
+        for btn in self.query(".option-btn"):
+            btn.display = False
+        self.query_one("#modal-body").display = False
+        self.query_one("#progress-text").display = True
+        self.query_one("#cancel-btn").display = True
+        self.query_one("#modal-header").update("Downloading qwen2.5-coder:1.5b")
+        self.query_one("#progress-text").update("  Starting download...")
+        self.run_worker(self._do_download(), name="model-download")
+
+    async def _do_download(self) -> None:
+        """Pull the model in a thread, updating progress in the event loop."""
+        app = self.app
+        progress_queue: list[dict] = []
+        error: Exception | None = None
+
+        def _pull() -> None:
+            nonlocal error
+            try:
+                for p in app.client.pull("qwen2.5-coder:1.5b"):  # type: ignore[union-attr]
+                    if self._cancel:
+                        return
+                    progress_queue.append(p)
+            except Exception as e:
+                error = e
+
+        pull_task = asyncio.create_task(asyncio.to_thread(_pull))
+
+        while not pull_task.done() or progress_queue:
+            while progress_queue:
+                p = progress_queue.pop(0)
+                status = p.get("status", "")
+                total = p.get("total", 0)
+                completed = p.get("completed", 0)
+                if total and completed:
+                    pct = int(completed / total * 100)
+                    bar = "█" * (pct // 2) + "░" * (50 - pct // 2)
+                    text = (
+                        f"  {bar}  {pct}%  "
+                        f"({completed // 1024 ** 2}MB/{total // 1024 ** 2}MB)"
+                    )
+                    self.query_one("#progress-text", Static).update(text)
+                else:
+                    self.query_one("#progress-text", Static).update(f"  {status}")
+            if not pull_task.done():
+                await asyncio.sleep(0.05)
+
+        if error:
+            self.query_one("#progress-text", Static).update(
+                f"  Download failed: {error}"
+            )
+            await asyncio.sleep(2)
+            self._show_options()
+            return
+
+        self.query_one("#progress-text", Static).update("  Download complete!")
+        await asyncio.sleep(0.5)
+        self.dismiss("qwen2.5-coder:1.5b")
+
+    def _show_options(self) -> None:
+        """Restore the options view (after cancel or error)."""
+        self.query_one("#modal-header").update("Model not found")
+        self.query_one("#modal-body").display = True
+        for btn in self.query(".option-btn"):
+            btn.display = True
+        self.query_one("#progress-text").update("")
+        self.query_one("#progress-text").display = False
+        self.query_one("#cancel-btn").display = False
 
 
 class ModelSwitchModal(ModalScreen[str]):
@@ -574,6 +745,11 @@ class NyxApp(App):
         except Exception:
             self._model_cache = []
 
+        # If the default model is missing, prompt the user.
+        if not self._model_cache or "qwen2.5-coder:1.5b" not in self._model_cache:
+            has_models = bool(self._model_cache)
+            self.push_screen(MissingModelModal(has_models), self._on_missing_model_result)
+
     # ── input handling ───────────────────────────────────────
 
     def on_mouse_scroll_up(self, event) -> None:
@@ -777,6 +953,24 @@ class NyxApp(App):
             self._add_system(f"model → {model}")
 
         self.query_one("#chat-input", NyxInput).focus()
+
+    def _on_missing_model_result(self, result: str | None) -> None:
+        """Handle the result from MissingModelModal."""
+        if result is None:
+            self.exit()
+            return
+        if result == "pick":
+            models = self._get_models()
+            self.push_screen(
+                ModelSwitchModal(models, self.config.model),
+                self._on_model_selected,
+            )
+            return
+        if result:
+            self.config.model = result
+            self.title = f"nyx — {self.config.model}"
+            self._refresh_models()
+            self._update_status()
 
     async def _auto_compact_for_model(self, model: str) -> None:
         """Auto-compact conversation after switching to a smaller model."""

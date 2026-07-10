@@ -161,3 +161,16 @@ class OllamaClient:
         except Exception:
             return None
         return None
+
+    def pull(self, model: str) -> Iterator[dict]:
+        """Pull a model from Ollama. Yields progress dicts.
+
+        Each progress dict may contain:
+            status: str      — "pulling <digest>", "verifying...", "success", etc.
+            digest: str      — sha256 of the layer being pulled
+            total: int       — total bytes for the layer
+            completed: int   — bytes downloaded so far
+
+        On success the final dict has status "success".
+        """
+        return self._client.pull(model, stream=True)
