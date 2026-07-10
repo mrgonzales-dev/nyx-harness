@@ -97,7 +97,7 @@ def install(slug: str) -> tuple[bool, str]:
         return False, f"could not download index: {e}"
 
     index_path = ds_dir / "index.json"
-    index_path.write_text(json.dumps(index))
+    index_path.write_text(json.dumps(index), encoding="utf-8")
 
     entry_count = len(index.get("entries", [])) if isinstance(index, dict) else 0
 
@@ -133,7 +133,7 @@ def install(slug: str) -> tuple[bool, str]:
         "installed_at": meta.installed_at,
         "entry_count": meta.entry_count,
         "db_size": meta.db_size,
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
     size_mb = db_size / 1024 / 1024
     return True, f"{meta.name} {meta.version} — {entry_count} entries, {size_mb:.1f}MB"
@@ -158,7 +158,7 @@ def list_installed() -> list[DocsetMeta]:
         if not meta_path.exists():
             continue
         try:
-            data = json.loads(meta_path.read_text())
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
             result.append(DocsetMeta(**data))
         except Exception:
             continue
@@ -199,7 +199,7 @@ def load_index(slug: str) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -210,7 +210,7 @@ def load_db(slug: str) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
