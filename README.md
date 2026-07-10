@@ -4,8 +4,9 @@
 
 ### Nope not your agent, YOU CODE it yourself, use me as your guide.
 
-This is a harness built to help you in understanding syntax, the programming language, and how it works.
-It automatically pulls docsets from [DevDocs](https://devdocs.io) and uses Ollama local model of your choice to act as a smart documentation guide to help you code.
+Nyx is a documentation harness powered by AI. It's built to help you understand syntax, programming languages, and how things work — by answering your questions with local intelligence.
+
+It automatically pulls docsets from [DevDocs](https://devdocs.io) and uses an Ollama model of your choice to act as a smart documentation guide that helps you code, not code for you.
 
 </div>
 
