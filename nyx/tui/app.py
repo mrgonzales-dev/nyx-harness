@@ -1477,8 +1477,6 @@ class NyxApp(App):
         if self._doc_in_context:
             doc_part = Text(f"  docs: {self._doc_full_tokens}", style="magenta")
             status = Text.assemble(status, doc_part)
-        if self._code_mode:
-            status = Text.assemble(status, Text("  code", style="bold cyan"))
         dots = self._spinner_chars[self._spinner_idx]
         status = Text.assemble(
             Text(f"{dots}  ", style="cyan"),
