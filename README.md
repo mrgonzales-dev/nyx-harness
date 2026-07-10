@@ -1,6 +1,6 @@
 <div align="center">
 
-![nyx-harness](nyx_docs/nyx_sample.png)
+![nyx-harness](docs/nyx_sample.png)
 
 ### Nope not your agent, YOU CODE it yourself, use me as your guide.
 
