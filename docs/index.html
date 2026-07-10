@@ -5,528 +5,212 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Nyx — AI harness built with documentation</title>
   <meta name="description" content="Nyx is an AI harness built with documentation. Stuck on syntax? Nyx helps you code, not code for you.">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: #06080a;
-      color: #d0d8e0;
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-      overflow-x: hidden;
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            nyx: {
+              50: '#e0faff',
+              100: '#b3f2ff',
+              200: '#80eaff',
+              300: '#4de2ff',
+              400: '#26dcff',
+              500: '#00e5ff',
+              600: '#00b8d4',
+              700: '#008ba3',
+              800: '#005e72',
+              900: '#003142',
+            }
+          }
+        }
+      }
     }
-
-    /* ── Background gradient glow ── */
+  </script>
+  <style>
     body::before {
       content: '';
       position: fixed;
       inset: 0;
       background:
-        radial-gradient(ellipse 90% 60% at 50% -20%, rgba(0, 229, 255, 0.12) 0%, transparent 70%),
-        radial-gradient(ellipse 60% 40% at 20% 60%, rgba(0, 229, 255, 0.04) 0%, transparent 60%),
-        radial-gradient(ellipse 50% 30% at 80% 80%, rgba(0, 229, 255, 0.03) 0%, transparent 50%);
+        radial-gradient(ellipse 90% 60% at 50% -20%, rgba(0, 229, 255, 0.10) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 40% at 20% 60%, rgba(0, 229, 255, 0.03) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 30% at 80% 80%, rgba(0, 229, 255, 0.02) 0%, transparent 50%);
       pointer-events: none;
       z-index: 0;
     }
-
-    .container {
-      width: 100%;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 0 28px;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* ── Nav ── */
-    .nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 20px 0 0;
-    }
-
-    .nav-logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-      color: #e0e8f0;
-      font-weight: 600;
-      font-size: 14px;
-    }
-
-    .nav-logo img {
-      height: 32px;
-      width: 32px;
-      border-radius: 6px;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 24px;
-      list-style: none;
-    }
-
-    .nav-links a {
-      color: #8090a0;
-      text-decoration: none;
-      font-size: 13px;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
-
-    .nav-links a:hover {
-      color: #00e5ff;
-    }
-
-    /* ── Hero ── */
-    .hero {
-      padding: 100px 0 60px;
-      text-align: center;
-    }
-
-    .hero-logo {
-      margin-bottom: 32px;
-      position: relative;
-      display: inline-block;
-    }
-
-    .hero-logo img {
-      height: 80px;
-      width: 80px;
-      border-radius: 16px;
-      position: relative;
-      z-index: 1;
-    }
-
-    .hero-logo::after {
-      content: '';
-      position: absolute;
-      inset: -20px;
-      background: radial-gradient(circle, rgba(0, 229, 255, 0.15) 0%, transparent 70%);
-      border-radius: 50%;
-      z-index: 0;
-    }
-
-    .hero h1 {
-      font-size: 56px;
-      font-weight: 800;
-      letter-spacing: -2px;
-      color: #f0f4f8;
-      line-height: 1.08;
-      margin-bottom: 20px;
-    }
-
-    .hero h1 .cyan {
-      background: linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero p.tagline {
-      font-size: 17px;
-      line-height: 1.7;
-      color: #8090a0;
-      max-width: 580px;
-      margin: 0 auto 48px;
-    }
-
-    .hero p.tagline strong {
-      color: #d0d8e0;
-    }
-
-    .hero-actions {
-      display: flex;
-      gap: 14px;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-bottom: 80px;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 32px;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 600;
-      text-decoration: none;
-      transition: all 0.25s;
-      letter-spacing: 0.1px;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%);
-      color: #0a0e12;
-      box-shadow: 0 4px 20px rgba(0, 229, 255, 0.25);
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 32px rgba(0, 229, 255, 0.35);
-    }
-
-    .btn-secondary {
-      border: 1px solid #2a3a48;
-      color: #c0c8d0;
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .btn-secondary:hover {
-      border-color: #00e5ff;
-      color: #00e5ff;
-      transform: translateY(-2px);
-      background: rgba(0, 229, 255, 0.06);
-    }
-
-    /* ── Terminal mockup ── */
-    .terminal {
-      background: #0c1218;
-      border: 1px solid #1a2838;
-      border-radius: 12px;
-      overflow: hidden;
-      margin-bottom: 100px;
-      text-align: left;
-      box-shadow: 0 8px 64px rgba(0, 0, 0, 0.5);
-    }
-
-    .terminal-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 16px;
-      background: #0e1620;
-      border-bottom: 1px solid #1a2838;
-    }
-
-    .terminal-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
-    .terminal-dot.red { background: #ff5f56; }
-    .terminal-dot.yellow { background: #ffbd2e; }
-    .terminal-dot.green { background: #27c93f; }
-
-    .terminal-title {
-      font-size: 12px;
-      color: #506070;
-      margin-left: 8px;
-      font-family: "SF Mono", "Fira Code", monospace;
-    }
-
-    .terminal-body {
-      padding: 20px 24px;
-      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-      font-size: 13px;
-      line-height: 1.8;
-      color: #708090;
-    }
-
-    .terminal-body .prompt {
-      color: #00e5ff;
-    }
-
-    .terminal-body .output {
-      color: #b0c0d0;
-    }
-
-    .terminal-body .comment {
-      color: #4a5a6a;
-      font-style: italic;
-    }
-
-    .terminal-body .highlight {
-      color: #00e5ff;
-    }
-
-    /* ── Features ── */
-    .section-title {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      text-align: center;
-      margin-bottom: 48px;
-      color: #e0e8f0;
-    }
-
-    .section-title span {
-      background: linear-gradient(135deg, #00e5ff 0%, #00b8d4 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .features {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 16px;
-      margin-bottom: 80px;
-    }
-
-    .feature {
-      background: linear-gradient(160deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.1) 100%);
-      border: 1px solid #1a2838;
-      border-radius: 12px;
-      padding: 28px;
-      transition: all 0.25s;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .feature::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.2), transparent);
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-
-    .feature:hover {
-      border-color: rgba(0, 229, 255, 0.2);
-      transform: translateY(-2px);
-    }
-
-    .feature:hover::before {
-      opacity: 1;
-    }
-
-    .feature-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      background: rgba(0, 229, 255, 0.08);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 14px;
-    }
-
-    .feature-icon svg {
-      width: 18px;
-      height: 18px;
-      color: #00e5ff;
-      stroke-width: 2;
-    }
-
-    .feature h3 {
-      font-size: 15px;
-      font-weight: 600;
-      color: #e0e8f0;
-      margin-bottom: 8px;
-    }
-
-    .feature p {
-      font-size: 13.5px;
-      line-height: 1.7;
-      color: #8090a0;
-    }
-
-    .feature code {
-      font-family: "SF Mono", "Fira Code", monospace;
-      font-size: 12px;
-      color: #c0d0e0;
-      background: #121a24;
-      padding: 1px 6px;
-      border-radius: 4px;
-    }
-
-    /* ── CTA Section ── */
-    .cta-section {
-      text-align: center;
-      padding: 60px 0 80px;
-    }
-
-    .cta-section h2 {
-      font-size: 32px;
-      font-weight: 700;
-      letter-spacing: -1px;
-      margin-bottom: 16px;
-      color: #e0e8f0;
-    }
-
-    .cta-section p {
-      font-size: 15px;
-      color: #8090a0;
-      margin-bottom: 32px;
-    }
-
-    /* ── Footer ── */
-    .footer {
-      border-top: 1px solid #141e2a;
-      padding: 28px 0;
-      text-align: center;
-    }
-
-    .footer p {
-      font-size: 13px;
-      color: #4a5a6a;
-    }
-
-    .footer a {
-      color: #00e5ff;
-      text-decoration: none;
-      transition: color 0.2s;
-    }
-
-    .footer a:hover {
-      color: #80efff;
-    }
-
-    /* ── Responsive ── */
-    @media (max-width: 640px) {
-      .hero { padding: 60px 0 40px; }
-      .hero h1 { font-size: 36px; }
-      .hero-logo img { height: 60px; width: 60px; }
-      .features { grid-template-columns: 1fr; }
-      .terminal-body { font-size: 11.5px; padding: 14px 16px; }
-      .hero-actions { flex-direction: column; align-items: center; }
-      .btn { width: 100%; justify-content: center; }
-      .nav-links { display: none; }
-    }
   </style>
 </head>
-<body>
+<body class="bg-[#06080a] text-[#d0d8e0] font-sans antialiased min-h-screen flex flex-col" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
 
-  <!-- ── Nav ── -->
-  <div class="container">
-    <nav class="nav">
-      <a href="#" class="nav-logo">
-        <img src="nyx_sample.png" alt="">
-        Nyx
-      </a>
-      <ul class="nav-links">
-        <li><a href="https://github.com/mrgonzales-dev/nyx-harness">GitHub</a></li>
-        <li><a href="https://github.com/mrgonzales-dev/nyx-harness#readme">Docs</a></li>
-        <li><a href="https://github.com/mrgonzales-dev/nyx-harness/blob/main/LICENSE">License</a></li>
-      </ul>
-    </nav>
-  </div>
+  <div id="app" class="relative z-[1] flex flex-col min-h-screen">
 
-  <!-- ── Hero ── -->
-  <section class="hero">
-    <div class="container">
-
-      <div class="hero-logo">
-        <img src="nyx_sample.png" alt="Nyx">
-      </div>
-
-      <h1>
-        Your code.<br>
-        <span class="cyan">Your guide.</span>
-      </h1>
-
-      <p class="tagline">
-        Nyx is an AI harness <strong>built with documentation</strong>. Use it when you're
-        stuck on syntax, when you want to understand how a language works, or when you
-        just want to learn. <strong>You write the code</strong> — Nyx is your guide, not your agent.
-      </p>
-
-      <div class="hero-actions">
-        <a href="https://github.com/mrgonzales-dev/nyx-harness" class="btn btn-primary">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-          View on GitHub
+    <!-- ── Nav ── -->
+    <div class="w-full max-w-4xl mx-auto px-6 pt-5">
+      <nav class="flex items-center justify-between">
+        <a href="#" class="flex items-center gap-2.5 font-semibold text-sm text-[#e0e8f0] no-underline">
+          <img src="nyx_sample.png" class="h-8 w-8 rounded-[6px]" alt="">
+          Nyx
         </a>
-        <a href="https://github.com/mrgonzales-dev/nyx-harness#readme" class="btn btn-secondary">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-          Read the docs
-        </a>
-      </div>
-
-      <!-- ── Terminal Demo ── -->
-      <div class="terminal">
-        <div class="terminal-bar">
-          <span class="terminal-dot red"></span>
-          <span class="terminal-dot yellow"></span>
-          <span class="terminal-dot green"></span>
-          <span class="terminal-title">nyx-harness</span>
-        </div>
-        <div class="terminal-body">
-          <span class="comment"># Ask Nyx anything, no browser needed</span><br>
-          <span class="prompt">$</span> nyx-harness<br><br>
-          <span class="comment"># Install a docset on the fly</span><br>
-          <span class="prompt">$</span> /docs install <span class="highlight">python~3.12</span><br>
-          <span class="output">✓ python~3.12 — 2,847 entries cached</span><br><br>
-          <span class="comment"># Browse docs in the terminal</span><br>
-          <span class="prompt">$</span> /docs <span class="highlight">python~3.12</span><br>
-          <span class="output">[full-screen browser with fuzzy search]</span><br><br>
-          <span class="comment"># Feed context to the AI</span><br>
-          <span class="prompt">$</span> &nbsp;<span class="highlight">a</span> &nbsp;<span class="comment">(send selected text to AI)</span><br>
-          <span class="prompt">$</span> /followup <span class="highlight">how does asyncio.run() work?</span><br>
-          <span class="output">asyncio.run() is a high-level entry point...</span>
-        </div>
-      </div>
-
+        <ul class="flex gap-6 list-none m-0 p-0">
+          <li><a href="https://github.com/mrgonzales-dev/nyx-harness" class="text-[#8090a0] no-underline text-[13px] font-medium hover:text-nyx-500 transition-colors">GitHub</a></li>
+          <li><a href="https://github.com/mrgonzales-dev/nyx-harness#readme" class="text-[#8090a0] no-underline text-[13px] font-medium hover:text-nyx-500 transition-colors">Docs</a></li>
+          <li><a href="https://github.com/mrgonzales-dev/nyx-harness/blob/main/LICENSE" class="text-[#8090a0] no-underline text-[13px] font-medium hover:text-nyx-500 transition-colors">License</a></li>
+        </ul>
+      </nav>
     </div>
-  </section>
 
-  <!-- ── Features ── -->
-  <div class="container">
-    <h2 class="section-title">Built for <span>how you code</span></h2>
+    <!-- ── Hero ── -->
+    <section class="flex-1 text-center pt-24 pb-16 md:pt-28 md:pb-20">
+      <div class="w-full max-w-4xl mx-auto px-6">
 
-    <div class="features">
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+        <!-- Logo -->
+        <div class="relative inline-block mb-8">
+          <img src="nyx_sample.png" alt="Nyx" class="h-20 w-20 rounded-xl relative z-[1]">
+          <div class="absolute inset-[-20px] rounded-full bg-radial-[circle_at_center] from-nyx-500/15 to-transparent"></div>
         </div>
-        <h3>Local & Private</h3>
-        <p>Runs entirely on your machine with Ollama. Every query, every doc — never leaves your laptop.</p>
+
+        <h1 class="text-[2.8rem] md:text-[3.5rem] font-extrabold tracking-[-2px] text-[#f0f4f8] leading-[1.08] mb-5">
+          Your code.<br>
+          <span class="bg-gradient-to-r from-nyx-500 to-nyx-600 bg-clip-text text-transparent">Your guide.</span>
+        </h1>
+
+        <p class="text-base md:text-[17px] leading-7 text-[#8090a0] max-w-[580px] mx-auto mb-12">
+          Nyx is an AI harness <strong class="text-[#d0d8e0] font-semibold">built with documentation</strong>.
+          Use it when you're stuck on syntax, when you want to understand how a language works,
+          or when you just want to learn. <strong class="text-[#d0d8e0] font-semibold">You write the code</strong>
+          — Nyx is your guide, not your agent.
+        </p>
+
+        <!-- CTA Buttons -->
+        <div class="flex gap-3.5 justify-center flex-wrap mb-20">
+          <a href="https://github.com/mrgonzales-dev/nyx-harness"
+             class="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-semibold no-underline
+                    bg-gradient-to-r from-nyx-500 to-nyx-600 text-[#0a0e12]
+                    shadow-[0_4px_20px_rgba(0,229,255,0.25)] hover:shadow-[0_8px_32px_rgba(0,229,255,0.35)]
+                    hover:-translate-y-0.5 transition-all duration-250">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            View on GitHub
+          </a>
+          <a href="https://github.com/mrgonzales-dev/nyx-harness#readme"
+             class="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-semibold no-underline
+                    border border-[#2a3a48] text-[#c0c8d0] bg-white/[0.03]
+                    hover:border-nyx-500 hover:text-nyx-500 hover:bg-nyx-500/[0.06] hover:-translate-y-0.5 transition-all duration-250">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            Read the docs
+          </a>
+        </div>
+
+        <!-- ── Terminal ── -->
+        <div class="bg-[#0c1218] border border-[#1a2838] rounded-xl overflow-hidden text-left shadow-[0_8px_64px_rgba(0,0,0,0.5)] mb-24">
+          <div class="flex items-center gap-2 px-4 py-3 bg-[#0e1620] border-b border-[#1a2838]">
+            <span class="w-[10px] h-[10px] rounded-full bg-[#ff5f56]"></span>
+            <span class="w-[10px] h-[10px] rounded-full bg-[#ffbd2e]"></span>
+            <span class="w-[10px] h-[10px] rounded-full bg-[#27c93f]"></span>
+            <span class="text-xs text-[#506070] ml-2 font-mono">nyx-harness</span>
+          </div>
+          <div class="p-5 md:px-6 md:py-5 font-mono text-xs md:text-[13px] leading-[1.9] text-[#708090]">
+            <span class="text-[#4a5a6a] italic"># Ask Nyx anything, no browser needed</span><br>
+            <span class="text-nyx-500">$</span> nyx-harness<br><br>
+            <span class="text-[#4a5a6a] italic"># Install a docset on the fly</span><br>
+            <span class="text-nyx-500">$</span> /docs install <span class="text-nyx-500">python~3.12</span><br>
+            <span class="text-[#b0c0d0]">✓ python~3.12 — 2,847 entries cached</span><br><br>
+            <span class="text-[#4a5a6a] italic"># Browse docs in the terminal</span><br>
+            <span class="text-nyx-500">$</span> /docs <span class="text-nyx-500">python~3.12</span><br>
+            <span class="text-[#b0c0d0]">[full-screen browser with fuzzy search]</span><br><br>
+            <span class="text-[#4a5a6a] italic"># Feed context to the AI</span><br>
+            <span class="text-nyx-500">$</span> <span class="text-nyx-500">a</span> <span class="text-[#4a5a6a] italic">(send selected text to AI)</span><br>
+            <span class="text-nyx-500">$</span> /followup <span class="text-nyx-500">how does asyncio.run() work?</span><br>
+            <span class="text-[#b0c0d0]">asyncio.run() is a high-level entry point...</span>
+          </div>
+        </div>
+
       </div>
+    </section>
 
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        </div>
-        <h3>Docs On Demand</h3>
-        <p>Install any DevDocs docset from the terminal. <code>/docs install go</code> — it's that fast.</p>
-      </div>
+    <!-- ── Features ── -->
+    <div class="w-full max-w-4xl mx-auto px-6">
+      <h2 class="text-[28px] font-bold tracking-[-0.5px] text-center mb-12 text-[#e0e8f0]">
+        Built for <span class="bg-gradient-to-r from-nyx-500 to-nyx-600 bg-clip-text text-transparent">how you code</span>
+      </h2>
 
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-20">
+        <!-- Vue renders these -->
+        <div v-for="feat in features" :key="feat.title"
+             class="bg-gradient-to-br from-white/[0.03] to-black/[0.1] border border-[#1a2838] rounded-xl p-7
+                    relative overflow-hidden group hover:border-nyx-500/20 hover:-translate-y-0.5 transition-all duration-250">
+          <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-nyx-500/20 to-transparent
+                      opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="w-9 h-9 rounded-lg bg-nyx-500/10 flex items-center justify-center mb-3.5">
+            <span v-html="feat.icon" class="text-nyx-500"></span>
+          </div>
+          <h3 class="text-[15px] font-semibold text-[#e0e8f0] mb-2">{{ feat.title }}</h3>
+          <p class="text-[13.5px] leading-[1.7] text-[#8090a0]" v-html="feat.desc"></p>
         </div>
-        <h3>Code Mode</h3>
-        <p>Toggle <code>/code</code> for deterministic code-only output. Temperature forced to 0.0, only fenced blocks survive.</p>
-      </div>
-
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        </div>
-        <h3>Context-Aware</h3>
-        <p>Select any text in a doc and feed it to the AI with <code>a</code>. Follow up with <code>/followup</code> to dig deeper.</p>
       </div>
     </div>
-  </div>
 
-  <!-- ── CTA ── -->
-  <div class="container">
-    <div class="cta-section">
-      <h2>Stop context-switching.<br>Keep your hands on the keyboard.</h2>
-      <p>MIT licensed. Free. Your data stays yours.</p>
-      <a href="https://github.com/mrgonzales-dev/nyx-harness" class="btn btn-primary">
+    <!-- ── CTA ── -->
+    <div class="w-full max-w-4xl mx-auto px-6 text-center pb-20">
+      <h2 class="text-3xl md:text-[32px] font-bold tracking-[-1px] mb-4 text-[#e0e8f0]">
+        Stop context-switching.<br>
+        Keep your hands on the keyboard.
+      </h2>
+      <p class="text-[15px] text-[#8090a0] mb-8">MIT licensed. Free. Your data stays yours.</p>
+      <a href="https://github.com/mrgonzales-dev/nyx-harness"
+         class="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-semibold no-underline
+                bg-gradient-to-r from-nyx-500 to-nyx-600 text-[#0a0e12]
+                shadow-[0_4px_20px_rgba(0,229,255,0.25)] hover:shadow-[0_8px_32px_rgba(0,229,255,0.35)]
+                hover:-translate-y-0.5 transition-all duration-250">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
         Get started on GitHub
       </a>
     </div>
+
+    <!-- ── Footer ── -->
+    <footer class="border-t border-[#141e2a] py-7 text-center">
+      <p class="text-xs text-[#4a5a6a]">
+        MIT License &mdash;
+        <a href="https://github.com/mrgonzales-dev/nyx-harness" class="text-nyx-500 no-underline hover:text-nyx-400 transition-colors">mrgonzales-dev/nyx-harness</a>
+      </p>
+    </footer>
+
   </div>
 
-  <!-- ── Footer ── -->
-  <footer class="footer">
-    <div class="container">
-      <p>MIT License &mdash; <a href="https://github.com/mrgonzales-dev/nyx-harness">mrgonzales-dev/nyx-harness</a></p>
-    </div>
-  </footer>
+  <script>
+    const { createApp } = Vue
+
+    createApp({
+      data() {
+        return {
+          features: [
+            {
+              title: 'Local & Private',
+              icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>',
+              desc: 'Runs entirely on your machine with Ollama. Every query, every doc — never leaves your laptop.'
+            },
+            {
+              title: 'Docs On Demand',
+              icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+              desc: 'Install any DevDocs docset from the terminal. <code class="text-[#c0d0e0] bg-[#121a24] px-[6px] py-[1px] rounded text-xs font-mono">/docs install go</code> — it\'s that fast.'
+            },
+            {
+              title: 'Code Mode',
+              icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+              desc: 'Toggle <code class="text-[#c0d0e0] bg-[#121a24] px-[6px] py-[1px] rounded text-xs font-mono">/code</code> for deterministic code-only output. Temperature forced to 0.0, only fenced blocks survive.'
+            },
+            {
+              title: 'Context-Aware',
+              icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+              desc: 'Select any text in a doc and feed it to the AI with <code class="text-[#c0d0e0] bg-[#121a24] px-[6px] py-[1px] rounded text-xs font-mono">a</code>. Follow up with <code class="text-[#c0d0e0] bg-[#121a24] px-[6px] py-[1px] rounded text-xs font-mono">/followup</code> to dig deeper.'
+            }
+          ]
+        }
+      }
+    }).mount('#app')
+  </script>
 
 </body>
 </html>
