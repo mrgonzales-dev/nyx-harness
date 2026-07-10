@@ -22,6 +22,16 @@ _CDN_BASE = "https://documents.devdocs.io"
 _USER_AGENT = "nyx/0.1.0"
 _CACHE_DIR = Path.home() / ".local" / "share" / "nyx" / "docs"
 
+# Shared client with retries and Windows-friendly DNS handling.
+# Connection pooling avoids repeated getaddrinfo calls and retries
+# handles transient DNS failures common on Windows.
+_HTTP = httpx.Client(
+    headers={"User-Agent": _USER_AGENT},
+    timeout=httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=10.0),
+    follow_redirects=True,
+    transport=httpx.HTTPTransport(retries=2),
+)
+
 
 def _cache_dir() -> Path:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -42,23 +52,13 @@ class DocsetMeta:
 
 def _fetch_catalog() -> list[dict]:
     """Fetch the DevDocs catalog. Returns list of docset dicts."""
-    r = httpx.get(
-        _CATALOG_URL,
-        headers={"User-Agent": _USER_AGENT},
-        timeout=15,
-        follow_redirects=True,
-    )
+    r = _HTTP.get(_CATALOG_URL)
     r.raise_for_status()
     return r.json()
 
 
 def _fetch_json(url: str) -> dict | list:
-    r = httpx.get(
-        url,
-        headers={"User-Agent": _USER_AGENT},
-        timeout=120,
-        follow_redirects=True,
-    )
+    r = _HTTP.get(url)
     r.raise_for_status()
     return r.json()
 
@@ -103,12 +103,7 @@ def install(slug: str) -> tuple[bool, str]:
 
     # Download db.json — this is the big one.
     try:
-        r = httpx.get(
-            f"{_CDN_BASE}/{slug}/db.json",
-            headers={"User-Agent": _USER_AGENT},
-            timeout=300,
-            follow_redirects=True,
-        )
+        r = _HTTP.get(f"{_CDN_BASE}/{slug}/db.json")
         r.raise_for_status()
     except Exception as e:
         # Clean up partial state — index.json was already written.
