@@ -103,6 +103,7 @@ This opens a full-screen modal with two states:
 | `/model [name]` | Switch model (or Ctrl+P for picker) |
 | `/models` | List available models |
 | `/system <prompt>` | Set system prompt |
+| `/code` | Toggle code mode — strips responses to code blocks only, sets temperature to 0.0 |
 | `/docs <slug>` | Browse an installed docset |
 | `/docs install <name>` | Download a docset |
 | `/docs list` | Show installed docsets |
@@ -115,6 +116,41 @@ This opens a full-screen modal with two states:
 | `/status` | Show current config |
 | `/help` | Show available commands |
 | `/quit` | Exit (or Ctrl+Q) |
+
+### Code Mode (`/code`)
+
+When you only want the code, toggle `/code` on. The harness modifies the system prompt
+to request code-only output and forces the model to temperature 0.0 for deterministic
+results. Non-code text is stripped from both the display and the conversation context
+— only fenced code blocks survive.
+
+The header changes to `☾ NYX [code mode]` so you know it's active. Toggle `/code` again
+to restore your original system prompt and temperature.
+
+### Missing Model
+
+If the default model (`qwen2.5-coder:1.5b`) is not installed at startup, a modal offers
+to download it, pick a different model, or continue without one if you already have
+other models available.
+
+## Install
+
+```bash
+pipx install git+https://github.com/mrgonzales-dev/nyx-harness.git
+```
+
+Make sure Ollama is installed and running:
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Start the server
+ollama serve
+
+# Pull a model (or skip — the app can download it for you)
+ollama pull qwen2.5-coder:1.5b
+```
 
 ## License
 
