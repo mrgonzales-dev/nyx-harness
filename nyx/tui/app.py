@@ -388,6 +388,14 @@ class NyxApp(App):
     #doc-popup > ListItem > Widget:hover {
         background: #1a1a2a;
     }
+
+    .user-message {
+        border-left: solid cyan;
+        padding: 0 1;
+        margin: 1 0;
+        height: auto;
+        background: $surface;
+    }
     """
 
     def __init__(self) -> None:
@@ -662,17 +670,7 @@ class NyxApp(App):
             return
 
         # ── normal chat turn ──
-        chat = self.query_one("#chat-history", VerticalScroll)
-        width = chat.content_size.width
-        self._add_message(
-            Text.assemble(
-                Text("─" * width, style="cyan dim"),
-                Text("\n"),
-                Text(text),
-                Text("\n"),
-                Text("─" * width, style="cyan dim"),
-            ),
-        )
+        self._add_user_message(text)
         self.convo.add_user(text)
 
         # If doc is in context, mark it for removal after the response.
@@ -896,17 +894,7 @@ class NyxApp(App):
         self._doc_in_context = True
 
         # Show the question in chat like a normal message.
-        chat = self.query_one("#chat-history", VerticalScroll)
-        width = chat.content_size.width
-        self._add_message(
-            Text.assemble(
-                Text("─" * width, style="cyan dim"),
-                Text("\n"),
-                Text(f"/followup {question}"),
-                Text("\n"),
-                Text("─" * width, style="cyan dim"),
-            ),
-        )
+        self._add_user_message(question)
         self.convo.add_user(question)
 
         # Mark for removal after response.
@@ -1157,6 +1145,13 @@ class NyxApp(App):
         chat.mount(widget)
         chat.scroll_end(animate=False)
         return widget
+
+    def _add_user_message(self, text: str) -> None:
+        """Render user input as a read-only field styled like the chat input."""
+        chat = self.query_one("#chat-history", VerticalScroll)
+        widget = Static(text, classes="user-message")
+        chat.mount(widget)
+        chat.scroll_end(animate=False)
 
     def _add_system(self, content) -> None:
         """Add a dim system-style message to the chat."""
