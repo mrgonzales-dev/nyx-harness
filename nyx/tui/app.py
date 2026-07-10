@@ -1635,7 +1635,7 @@ class NyxApp(App):
             Text("\n"),
             Text("☾ ", style="cyan"),
             Text("NYX", style="bold cyan"),
-            Text(" [code]", style="dim"),
+            Text(" [code mode]", style="dim"),
             Text("\n\n"),
             Text(text, style="dim"),
             Text("\n"),
@@ -1645,7 +1645,7 @@ class NyxApp(App):
         """Build the assistant message content: header + markdown body."""
         chat = self.query_one("#chat-history", VerticalScroll)
         width = chat.content_size.width or 80
-        header_suffix = " [code]" if self._code_mode else ""
+        header_suffix = " [code mode]" if self._code_mode else ""
         return Text.assemble(
             Text("\n"),
             Text("☾ ", style="cyan"),
