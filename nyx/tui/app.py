@@ -65,6 +65,17 @@ CODE_MODE_PROMPT = (
     "If there are multiple blocks, output each in its own fence."
 )
 
+# System prompt appended when /tools mode is active.
+TOOLS_SYSTEM_PROMPT = (
+    "\n\n[tools mode]\n"
+    "You have access to tools. Call a tool when needed, then use the result "
+    "to answer the user. After receiving tool results, give your final answer "
+    "— do NOT call the same tool again with the same arguments. "
+    "For search_docs: use specific function or package names as the query "
+    "(e.g. 'strings HasPrefix', not 'how to check string prefix'). "
+    "Separate keywords with spaces, not concatenation."
+)
+
 
 class MissingModelModal(ModalScreen[str]):
     """Modal shown when the default model is not available on Ollama.
@@ -1638,6 +1649,10 @@ class NyxApp(App):
 
         # Tool-calling mode uses a non-streaming loop instead of streaming.
         if self._tools_mode:
+            # Inject tool-use guidance into the system prompt.
+            messages = [dict(m) for m in messages]  # shallow copy
+            if messages and messages[0]["role"] == "system":
+                messages[0]["content"] += TOOLS_SYSTEM_PROMPT
             await self._stream_with_tools(messages, my_gen)
             return
 
@@ -1717,7 +1732,7 @@ class NyxApp(App):
         answer (no tool calls) or max turns is reached.
         """
         tools = tool_registry.get_tool_definitions()
-        max_turns = 5
+        max_turns = 4  # limit round-trips to avoid template errors
 
         for turn in range(max_turns):
             if self._active_gen is not my_gen:

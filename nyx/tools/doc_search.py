@@ -6,16 +6,17 @@ matching page (not the whole page), strips HTML, and trims results to
 keep context usage small.
 
 Algorithm:
-  1. Tokenize the query into keywords.
-  2. Score every entry in every installed docset by fuzzy-matching
-     keywords against the entry name (and path).
-  3. Take the top N candidates by score.
-  4. For each candidate, extract the HTML section identified by the
-     anchor in the entry path (from the heading to the next heading).
-  5. Strip HTML tags, trim each section to MAX_SECTION_CHARS.
-  6. Verify the query terms actually appear in the extracted text —
-     drop false positives where the name matched but the content
-     doesn't mention the query.
+  1. Tokenize the query into keywords (splits camelCase, snake_case, etc).
+  2. Pre-filter: quick substring scan to narrow candidates before
+     expensive fuzzy matching.
+  3. Score entries with weighted matching:
+       - exact word match  > substring match > fuzzy match
+       - name match        > path match
+       - multi-keyword hits boost score
+  4. Extract the relevant HTML section per match (heading to heading).
+  5. Strip HTML, trim each section to MAX_SECTION_CHARS.
+  6. Content re-score: boost results where more keywords appear in
+     the extracted text; drop false positives.
   7. Return formatted results within a total character budget.
 """
 
@@ -28,21 +29,67 @@ from nyx.tools import docs as docset_manager
 
 # ── tuning constants ────────────────────────────────────────────
 
-# Max characters per extracted section.
 MAX_SECTION_CHARS = 1500
-
-# Max total characters across all returned results.
 MAX_TOTAL_CHARS = 4000
-
-# Maximum number of results to return.
 MAX_RESULTS = 3
 
-# Minimum fuzzy match score (0.0–1.0) to consider an entry.
-MIN_MATCH_SCORE = 0.35
+# Minimum fuzzy score (0.0–1.0) to keep an entry after pre-filter.
+MIN_MATCH_SCORE = 0.3
 
-# Minimum number of query keywords that must appear in the extracted
-# content for a result to be kept (filters false positives).
-MIN_CONTENT_HITS = 1
+# How many candidates to extract after scoring (before content filtering).
+CANDIDATE_POOL = 12
+
+# ── tokenization ────────────────────────────────────────────────
+
+# Splits camelCase, PascalCase, snake_case, kebab-case, dot.paths.
+_SPLIT_RE = re.compile(r"(?<=[a-z])(?=[A-Z])|[\s/._\-]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Split text into lowercase keyword tokens.
+
+    Handles camelCase (HasPrefix → has, prefix), snake_case, dot paths,
+    and kebab-case.  Filters out tokens shorter than 2 chars.
+    """
+    parts = _SPLIT_RE.split(text)
+    return [p.lower() for p in parts if len(p) >= 2]
+
+
+def _is_subseq(needle: str, haystack: str) -> bool:
+    """Check if *needle* is a subsequence of *haystack* (all chars in order)."""
+    it = iter(haystack)
+    return all(c in it for c in needle)
+
+
+def _split_concatenated(token: str, known_tokens: set[str]) -> list[str]:
+    """Try to split a concatenated token using known entry tokens.
+
+    If the token wasn't split by _tokenize (e.g. "stringsprefix"), try
+    to break it using known_tokens as a dictionary.  For example, if
+    "strings" and "prefix" are known tokens, "stringsprefix" splits
+    into ["strings", "prefix"].
+
+    Returns the original token in a list if no split is found.
+    """
+    if len(token) < 6:
+        return [token]
+
+    # Try to find known tokens that are prefixes of the token.
+    for known in known_tokens:
+        if len(known) >= 3 and token.startswith(known):
+            remainder = token[len(known):]
+            if len(remainder) >= 2:
+                # Recursively split the remainder.
+                rest_parts = _split_concatenated(remainder, known_tokens)
+                if rest_parts != [remainder]:
+                    return [known] + rest_parts
+                # Also check if remainder itself is a known token.
+                if remainder in known_tokens:
+                    return [known, remainder]
+                # Even if remainder isn't known, the split is useful.
+                return [known, remainder]
+
+    return [token]
 
 
 # ── HTML utilities ──────────────────────────────────────────────
@@ -50,111 +97,195 @@ MIN_CONTENT_HITS = 1
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 _CODE_RE = re.compile(r"<pre[^>]*>(.*?)</pre>", re.DOTALL)
-_HEADING_RE = re.compile(r"<h([234])[^>]*>", re.DOTALL)
 
 
 def _strip_html(html: str) -> str:
     """Convert HTML to plain text, preserving code blocks."""
-    # Preserve code blocks with fences.
     def _code_repl(m: re.Match) -> str:
         inner = _TAG_RE.sub("", m.group(1))
         return f"\n```\n{inner.strip()}\n```\n"
 
     html = _CODE_RE.sub(_code_repl, html)
-    # Remove all remaining tags.
     text = _TAG_RE.sub("", html)
-    # Collapse whitespace.
     text = _WS_RE.sub(" ", text).strip()
-    # Clean up spaces around code fences.
     text = re.sub(r"\s*```\s*", "\n```\n", text)
     return text
 
 
 def _extract_section(html: str, anchor: str) -> str:
     """Extract the HTML from the heading with id=anchor to the next heading."""
-    # Find the heading with the given anchor id.
     pattern = re.compile(
         rf'<h([234])[^>]*id=["\']?{re.escape(anchor)}["\']?', re.IGNORECASE
     )
     m = pattern.search(html)
     if not m:
-        # Fallback: try to find the anchor anywhere and grab surrounding content.
+        # Fallback: find anchor anywhere and grab surrounding content.
         pos = html.find(f'id="{anchor}"')
         if pos == -1:
             pos = html.find(anchor)
         if pos == -1:
             return ""
-        # Grab a chunk starting from the anchor.
         chunk = html[pos : pos + MAX_SECTION_CHARS * 3]
         return _strip_html(chunk)[:MAX_SECTION_CHARS]
 
     heading_level = int(m.group(1))
     start = m.start()
 
-    # Find the next heading of the same or higher level (h2 >= h3 >= h4).
+    # Find the next heading of same or higher level (h2 >= h3 >= h4).
     next_heading = re.compile(rf"<h[2-{heading_level}][^>]*>", re.IGNORECASE)
     rest = html[start + 1 :]
     m2 = next_heading.search(rest)
     if m2:
         section_html = html[start : start + 1 + m2.start()]
     else:
-        # No next heading — take to end of page, but cap it.
         section_html = html[start : start + MAX_SECTION_CHARS * 3]
 
     text = _strip_html(section_html)
     return text[:MAX_SECTION_CHARS]
 
 
-# ── fuzzy matching ──────────────────────────────────────────────
+# ── scoring ─────────────────────────────────────────────────────
 
-def _tokenize(query: str) -> list[str]:
-    """Split a query into lowercase keyword tokens."""
-    return [t for t in re.split(r"[\s/._-]+", query.lower()) if len(t) >= 2]
+def _score_entry(
+    keywords: list[str], name: str, path: str
+) -> float:
+    """Score an entry against query keywords.
 
+    Weighted scoring:
+      - exact word match:    1.0 per keyword
+      - substring match:     0.7 per keyword
+      - fuzzy match (>0.6):  ratio per keyword
+      - no match:            0.0
 
-def _fuzzy_score(keywords: list[str], target: str) -> float:
-    """Score how well *target* matches the *keywords*.
-
-    Uses SequenceMatcher for each keyword against the full target and
-    each word in the target.  Returns the best average match across
-    keywords.
+    Name matches are weighted 2x over path matches.
+    Multi-keyword coverage gives a bonus.
     """
-    target_lower = target.lower()
-    target_words = re.split(r"[\s/._-]+", target_lower)
+    name_tokens = set(_tokenize(name))
+    path_tokens = set(_tokenize(path))
+    name_lower = name.lower()
+    path_lower = path.lower()
 
-    scores: list[float] = []
+    total = 0.0
+    hits = 0
+
     for kw in keywords:
-        # Best match for this keyword: against full target or any word.
-        best = SequenceMatcher(None, kw, target_lower).ratio()
-        for word in target_words:
-            if len(word) >= 2:
-                ratio = SequenceMatcher(None, kw, word).ratio()
-                if ratio > best:
-                    best = ratio
-        scores.append(best)
+        kw_score = 0.0
 
-    return sum(scores) / len(scores) if scores else 0.0
+        # Exact word match in name (highest weight).
+        if kw in name_tokens:
+            kw_score = 1.0
+        # Substring match in name.
+        elif kw in name_lower:
+            kw_score = 0.7
+        # Exact word match in path.
+        elif kw in path_tokens:
+            kw_score = 0.5
+        # Substring match in path.
+        elif kw in path_lower:
+            kw_score = 0.35
+        else:
+            # Fuzzy match against name words.
+            best_fuzzy = 0.0
+            for token in name_tokens:
+                ratio = SequenceMatcher(None, kw, token).ratio()
+                if ratio > best_fuzzy:
+                    best_fuzzy = ratio
+            # Also fuzzy against full name.
+            ratio = SequenceMatcher(None, kw, name_lower).ratio()
+            if ratio > best_fuzzy:
+                best_fuzzy = ratio
+            if best_fuzzy >= 0.6:
+                kw_score = best_fuzzy * 0.6  # fuzzy is worth less than substring
+
+        if kw_score > 0:
+            hits += 1
+        total += kw_score
+
+    # Average per-keyword score, weighted by coverage.
+    avg = total / len(keywords) if keywords else 0.0
+    coverage_bonus = (hits / len(keywords)) * 0.15 if keywords else 0.0
+
+    return min(1.0, avg + coverage_bonus)
 
 
 # ── content verification ────────────────────────────────────────
 
-def _content_has_keywords(text: str, keywords: list[str]) -> int:
-    """Count how many query keywords appear in the extracted text."""
+def _content_keyword_hits(text: str, keywords: list[str]) -> int:
+    """Count how many query keywords appear in the extracted text.
+
+    A keyword counts as a hit if it appears as a substring, or as a
+    subsequence (handles concatenated query tokens like "stringsprefix"
+    matching content that has "strings.HasPrefix").
+    """
     text_lower = text.lower()
     hits = 0
     for kw in keywords:
         if kw in text_lower:
             hits += 1
+        elif len(kw) >= 6 and _is_subseq(kw, text_lower):
+            hits += 1
     return hits
+
+
+# ── docset name mapping ─────────────────────────────────────────
+
+# Map common language names to docset slug prefixes.
+_DOCSET_ALIASES: dict[str, str] = {
+    "go": "go",
+    "golang": "go",
+    "python": "python",
+    "py": "python",
+    "javascript": "javascript",
+    "js": "javascript",
+    "typescript": "typescript",
+    "ts": "typescript",
+    "rust": "rust",
+    "ruby": "ruby",
+    "rb": "ruby",
+    "java": "java",
+    "c": "c",
+    "cpp": "cpp",
+    "c++": "cpp",
+    "php": "php",
+    "html": "html",
+    "css": "css",
+    "react": "react",
+    "vue": "vue",
+    "dart": "dart",
+    "kotlin": "kotlin",
+    "swift": "swift",
+    "node": "node",
+    "nodejs": "node",
+    "bash": "bash",
+    "shell": "bash",
+    "sh": "bash",
+    "sql": "postgresql",
+    "postgres": "postgresql",
+    "sqlite": "sqlite",
+    "mongodb": "mongodb",
+}
+
+
+def _resolve_docset(filter_str: str) -> str | None:
+    """Map a user-provided docset name to a slug prefix.
+
+    Returns None if no mapping is found (search all docsets).
+    """
+    return _DOCSET_ALIASES.get(filter_str.lower())
 
 
 # ── main search function ────────────────────────────────────────
 
-def search_docs(query: str) -> str:
+def search_docs(query: str, docset: str = "") -> str:
     """Search installed docsets for *query* and return relevant snippets.
 
-    Returns a formatted string with the top results, or a message if
-    nothing was found or no docsets are installed.
+    Args:
+        query: Search keywords — use specific function or package names
+               for best results, e.g. "strings HasPrefix" or "json dumps".
+        docset: Optional docset filter — a language name like "go",
+                "python", "javascript" to narrow the search.
+
+    Returns formatted snippets or a no-results message.
     """
     installed = docset_manager.list_installed()
     if not installed:
@@ -162,47 +293,77 @@ def search_docs(query: str) -> str:
 
     keywords = _tokenize(query)
     if not keywords:
-        return "Please provide search keywords."
+        return "Please provide search keywords (e.g. 'strings HasPrefix')."
 
-    # ── 1. Score all entries across all docsets ──
-    candidates: list[tuple[float, str, dict, str]] = []  # (score, slug, entry, page_key)
+    # Resolve optional docset filter.
+    slug_filter = _resolve_docset(docset) if docset else None
+    if slug_filter:
+        installed = [d for d in installed if d.slug.lower().startswith(slug_filter)]
+        if not installed:
+            return f"No docset matching '{docset}' is installed. Use /docs list to see installed docsets."
+
+    # ── 1. Collect known tokens from entry names (for splitting concatenated queries) ──
+    all_entries: list[tuple[str, dict]] = []  # (slug, entry)
+    known_tokens: set[str] = set()
 
     for ds in installed:
         index = docset_manager.load_index(ds.slug)
-        db = docset_manager.load_db(ds.slug)
-        if not index or not db:
+        if not index:
             continue
+        for entry in index.get("entries", []):
+            all_entries.append((ds.slug, entry))
+            for tok in _tokenize(entry.get("name", "")):
+                known_tokens.add(tok)
 
-        entries = index.get("entries", [])
-        for entry in entries:
-            name = entry.get("name", "")
-            path = entry.get("path", "")
-            # The page key is the path before the # anchor.
-            page_key = path.split("#")[0]
+    # Try to split concatenated query tokens using known entry tokens.
+    # e.g. "stringsprefix" → ["strings", "prefix"] if both are known.
+    expanded_keywords: list[str] = []
+    for kw in keywords:
+        split = _split_concatenated(kw, known_tokens)
+        expanded_keywords.extend(split)
+    keywords = expanded_keywords if len(expanded_keywords) > len(keywords) else keywords
 
-            # Skip if the page isn't in the db.
-            if page_key not in db:
+    # ── 2. Score all entries ──
+    candidates: list[tuple[float, str, dict, str]] = []
+
+    for slug, entry in all_entries:
+        name = entry.get("name", "")
+        path = entry.get("path", "")
+        page_key = path.split("#")[0]
+
+        # Quick pre-filter: at least one keyword should match somehow.
+        combined = (name + " " + path).lower()
+        matched = False
+        for kw in keywords:
+            if kw in combined:
+                matched = True
+                break
+            if len(kw) >= 6 and _is_subseq(kw, combined):
+                matched = True
+                break
+        if not matched:
+            # Fuzzy fallback for near-misses.
+            if not any(
+                SequenceMatcher(None, kw, name.lower()).ratio() >= 0.6
+                for kw in keywords
+            ):
                 continue
 
-            score = _fuzzy_score(keywords, name)
-            # Boost exact substring matches.
-            if all(kw in name.lower() for kw in keywords):
-                score = min(1.0, score + 0.3)
-
-            if score >= MIN_MATCH_SCORE:
-                candidates.append((score, ds.slug, entry, page_key))
+        score = _score_entry(keywords, name, path)
+        if score >= MIN_MATCH_SCORE:
+            candidates.append((score, slug, entry, page_key))
 
     if not candidates:
-        return f"No results for '{query}'."
+        return f"No results for '{query}'" + (f" in {docset}." if docset else ".")
 
-    # Sort by score descending, take top candidates.
+    # Sort by score, take top candidates.
     candidates.sort(key=lambda c: c[0], reverse=True)
-    candidates = candidates[: MAX_RESULTS * 3]  # over-fetch, we'll filter
+    candidates = candidates[:CANDIDATE_POOL]
 
-    # ── 2. Extract sections and verify relevance ──
-    results: list[tuple[float, str, str, str]] = []  # (score, slug, name, text)
+    # ── 2. Extract sections, verify, and re-score ──
+    results: list[tuple[float, str, str, str]] = []
     total_chars = 0
-    db_cache: dict[str, dict] = {}  # slug -> db, loaded lazily
+    db_cache: dict[str, dict] = {}
 
     for score, slug, entry, page_key in candidates:
         if len(results) >= MAX_RESULTS:
@@ -212,7 +373,7 @@ def search_docs(query: str) -> str:
         anchor = path.split("#", 1)[1] if "#" in path else ""
         name = entry.get("name", path)
 
-        # Load the db for this docset (cached).
+        # Load db (cached).
         if slug not in db_cache:
             db_cache[slug] = docset_manager.load_db(slug) or {}
         db = db_cache[slug]
@@ -221,37 +382,56 @@ def search_docs(query: str) -> str:
             continue
 
         html = db[page_key]
-        section_text = _extract_section(html, anchor) if anchor else _strip_html(html)[:MAX_SECTION_CHARS]
+        section_text = (
+            _extract_section(html, anchor)
+            if anchor
+            else _strip_html(html)[:MAX_SECTION_CHARS]
+        )
 
         if not section_text:
             continue
 
-        # Verify query terms appear in the content.
-        content_hits = _content_has_keywords(section_text, keywords)
-        if content_hits < MIN_CONTENT_HITS:
+        # Content re-score: boost if keywords appear in extracted text.
+        content_hits = _content_keyword_hits(section_text, keywords)
+        if content_hits == 0:
+            # Drop false positives — name matched but content has none of the keywords.
             continue
 
-        # Trim if we'd exceed the total budget (account for header + separator).
+        # Boost: each content hit adds up to 0.1 to the score.
+        content_boost = min(0.2, content_hits * 0.1)
+        final_score = min(1.0, score + content_boost)
+
+        # Budget check.
         header = f"[{len(results)+1}] {name}  ({slug})"
-        overhead = len(header) + 2  # header + newline + blank line separator
+        overhead = len(header) + 2
         remaining = MAX_TOTAL_CHARS - total_chars - overhead
         if remaining <= 100:
             break
         if len(section_text) > remaining:
-            section_text = section_text[:max(0, remaining - 3)].rsplit(" ", 1)[0] + "..."
+            section_text = section_text[: max(0, remaining - 3)].rsplit(" ", 1)[0] + "..."
 
-        results.append((score, slug, name, section_text))
+        results.append((final_score, slug, name, section_text))
         total_chars += len(section_text) + overhead
 
     if not results:
-        return f"No relevant results for '{query}' (matched entry names but content didn't contain the keywords)."
+        return (
+            f"No relevant results for '{query}'"
+            + (f" in {docset}" if docset else "")
+            + " — matched entry names but content didn't contain the keywords."
+        )
 
-    # ── 3. Format output ──
+    # ── 3. Sort by final score and format ──
+    results.sort(key=lambda r: r[0], reverse=True)
+
     parts: list[str] = []
     for i, (score, slug, name, text) in enumerate(results, 1):
         parts.append(f"[{i}] {name}  ({slug})")
         parts.append(text)
-        parts.append("")  # blank line between results
+        parts.append("")
+
+    # Trailing instruction so the model knows to answer, not re-search.
+    parts.append("---")
+    parts.append("Use the above documentation to answer the user's question. Do not call search_docs again for the same query.")
 
     return "\n".join(parts).strip()
 
@@ -263,17 +443,33 @@ TOOL_DEF = {
     "function": {
         "name": "search_docs",
         "description": (
-            "Search installed documentation docsets for a keyword or topic. "
-            "Returns relevant code documentation snippets. "
-            "Use this when the user asks about a library, API, function, or language feature."
+            "Search installed documentation docsets for a specific function, "
+            "class, method, or package. Returns concise code documentation "
+            "snippets with syntax and examples.\n\n"
+            "TIPS for best results:\n"
+            "- Use specific function or class names: 'strings HasPrefix', not 'how to check string start'\n"
+            "- Include the package/module when known: 'json dumps', 'crypto aes', 'Array map'\n"
+            "- Separate multiple keywords with spaces: 'strings Replace' not 'stringsReplace'\n"
+            "- Use the docset parameter to narrow to a language: 'go', 'python', 'javascript'"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search keywords, e.g. 'strings HasPrefix' or 'array map filter'",
-                }
+                    "description": (
+                        "Specific function/class/package name to search for. "
+                        "Use space-separated keywords: 'strings HasPrefix', 'json dumps', 'Array flatMap'. "
+                        "Do NOT concatenate words: use 'strings HasPrefix' not 'stringsHasPrefix'."
+                    ),
+                },
+                "docset": {
+                    "type": "string",
+                    "description": (
+                        "Optional: language/docset to narrow search — 'go', 'python', 'javascript'. "
+                        "Omit to search all installed docsets."
+                    ),
+                },
             },
             "required": ["query"],
         },
