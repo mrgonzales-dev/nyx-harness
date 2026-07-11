@@ -25,10 +25,12 @@ from textual.widgets import Button, Input as _Input, ListView, ListItem, Static
 from nyx.core.chat import Conversation, estimate_messages_tokens, estimate_tokens
 from nyx.core.client import OllamaClient
 from nyx.core.config import load_config
+from nyx.core.updater import check_for_updates
 from nyx.tui.config_modal import ConfigModal
 from nyx.tui.doc_browser import DocBrowser
 from nyx.tui.markdown_renderer import render_markdown
 from nyx.tools import docs as docset_manager
+from nyx.tools import registry as tool_registry
 
 
 # ── command registry ────────────────────────────────────────
@@ -38,6 +40,7 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("models",      "list available models",         "cmd_models"),
     ("system",      "set system prompt",             "cmd_system"),
     ("code",        "toggle code-only mode",         "cmd_code"),
+    ("tools",       "toggle tool calling",           "cmd_tools"),
     ("docs",        "browse/install docsets",        "cmd_docs"),
     ("followup",    "re-inject last doc and ask",    "cmd_followup"),
     ("cls",         "clear screen",                   "cmd_cls"),
@@ -46,6 +49,7 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("context",     "show context usage breakdown",  "cmd_context"),
     ("config",      "adjust settings",               "cmd_config"),
     ("status",      "show current config",           "cmd_status"),
+    ("update",      "check for updates",             "cmd_update"),
     ("help",        "show available commands",       "cmd_help"),
     ("quit",        "exit (or Ctrl+D)",              "cmd_quit"),
 ]
@@ -600,12 +604,19 @@ class NyxApp(App):
         self._active_gen: int | None = None  # generation of the currently active stream
         self._compacting: bool = False      # True while /compact worker is running
         self._thinking = False
+        self._thinking_text: str = ""
         self._auto_scroll = True
 
         # Code mode — strips response to code blocks only.
         self._code_mode: bool = False
         self._original_temperature: float = self.config.temperature
         self._code_system_saved: str | None = None
+
+        # Tools mode — enables tool calling (calculator, etc.).
+        self._tools_mode: bool = False
+
+        # Track the order modes were enabled for display suffix.
+        self._mode_order: list[str] = []
 
         # Fetch the model's actual context window from Ollama.
         self._model_ctx: int | None = None
@@ -660,9 +671,19 @@ class NyxApp(App):
         """True when a stream worker is active."""
         return self._active_gen is not None
 
+    @property
+    def _mode_suffix(self) -> str:
+        """Suffix string for active modes, shown in headers and status bar.
+
+        Modes appear in the order they were enabled.
+        """
+        labels = {"code": "[code mode]", "tools": "[tools]"}
+        parts = [labels[m] for m in self._mode_order if m in labels]
+        return (" " + " ".join(parts)) if parts else ""
+
     def action_open_model_modal(self) -> None:
         """Ctrl+P — open the model switch modal."""
-        if self._is_streaming:
+        if self._is_streaming or self._compacting:
             return
         models = self._get_models()
         self.push_screen(ModelSwitchModal(models, self.config.model), self._on_model_selected)
@@ -738,6 +759,8 @@ class NyxApp(App):
         self.set_interval(0.12, self._tick_spinner)
         # Pre-populate model cache in a worker so the suggester doesn't block.
         self.run_worker(self._warm_model_cache(), name="warm-models")
+        # Background update check — shows a toast if behind.
+        self.run_worker(self._do_update_check(startup=True), name="startup-update")
 
     async def _warm_model_cache(self) -> None:
         """Fetch model list in the background to avoid suggester blocking."""
@@ -840,7 +863,7 @@ class NyxApp(App):
             self._select_doc_slug(event.list_view)
 
     def on_input_submitted(self, event: NyxInput.Submitted) -> None:
-        if self._is_streaming:
+        if self._is_streaming or self._compacting:
             return
 
         # Expand paste markers to full multi-line content.
@@ -949,6 +972,7 @@ class NyxApp(App):
                     f"context is {total} tokens — auto-compacting...",
                     style="yellow",
                 ))
+                self._compacting = True
                 self.run_worker(self._auto_compact_for_model(model), name="auto-compact")
         else:
             self._add_system(f"model → {model}")
@@ -975,6 +999,7 @@ class NyxApp(App):
 
     async def _auto_compact_for_model(self, model: str) -> None:
         """Auto-compact conversation after switching to a smaller model."""
+        self._compacting = True
         try:
             ok = await asyncio.to_thread(self.convo.compact, self.client)
             if ok:
@@ -1001,6 +1026,8 @@ class NyxApp(App):
                 ))
         except Exception as e:
             self._add_system(Text(f"auto-compaction failed: {e}", style="bold red"))
+        finally:
+            self._compacting = False
         self._update_status()
 
     def cmd_models(self, _arg: str) -> None:
@@ -1037,6 +1064,7 @@ class NyxApp(App):
     def _code_on(self) -> None:
         """Activate code mode."""
         self._code_mode = True
+        self._mode_order.append("code")
         # Save state for clean restore.
         self._code_system_saved = self.config.effective_system
         self._original_temperature = self.config.temperature
@@ -1050,6 +1078,7 @@ class NyxApp(App):
     def _code_off(self) -> None:
         """Deactivate code mode."""
         self._code_mode = False
+        self._mode_order = [m for m in self._mode_order if m != "code"]
         # Restore original system prompt.
         if self._code_system_saved is not None:
             self.convo.set_system(self._code_system_saved)
@@ -1072,6 +1101,25 @@ class NyxApp(App):
             self._code_off()
         else:
             self._code_on()
+
+    def cmd_tools(self, arg: str) -> None:
+        """Toggle tool calling mode."""
+        if self._is_streaming:
+            return
+        self._tools_mode = not self._tools_mode
+        if self._tools_mode:
+            self._mode_order.append("tools")
+            tool_names = ", ".join(
+                t["function"]["name"] for t in tool_registry.get_tool_definitions()
+            )
+            self._add_system(Text(
+                f"tools ON — available: {tool_names}",
+                style="cyan",
+            ))
+        else:
+            self._mode_order = [m for m in self._mode_order if m != "tools"]
+            self._add_system(Text("tools OFF", style="dim"))
+        self._update_status()
 
     def cmd_docs(self, arg: str) -> None:
         """Browse and manage docsets."""
@@ -1123,7 +1171,7 @@ class NyxApp(App):
 
     def cmd_followup(self, arg: str) -> None:
         """Re-inject the last doc and ask a question about it."""
-        if self._is_streaming:
+        if self._is_streaming or self._compacting:
             return
 
         if self._doc_slug is None or not self._doc_full_markdown:
@@ -1313,6 +1361,7 @@ class NyxApp(App):
         self._add_system("conversation cleared")
 
     def cmd_compact(self, _arg: str) -> None:
+        self._compacting = True
         self.run_worker(self._run_compact(), name="compact")
 
     async def _run_compact(self) -> None:
@@ -1384,11 +1433,48 @@ class NyxApp(App):
     def cmd_status(self, _arg: str) -> None:
         limit = self._effective_context_limit
         desc = f"  model: {self.config.model}  |  turns: {self.convo.turn_count}  |  ctx: {self.convo.token_count}/{limit}"
+        modes = []
+        if self._code_mode:
+            modes.append("code")
+        if self._tools_mode:
+            modes.append("tools")
+        mode_str = f"  |  modes: {', '.join(modes)}" if modes else ""
         system = self.config.effective_system
         if len(system) > 80:
             system = system[:80] + "..."
-        self._add_system(Panel(Text(f"{desc}\n  system: {system}"), title="status", border_style="cyan"))
+        self._add_system(Panel(Text(f"{desc}{mode_str}\n  system: {system}"), title="status", border_style="cyan"))
         self._update_status()
+
+    def cmd_update(self, _arg: str) -> None:
+        """Check for updates from the git remote."""
+        self._add_system(Text("checking for updates...", style="dim"))
+        self.run_worker(self._do_update_check(), name="update-check")
+
+    async def _do_update_check(self) -> None:
+        """Run the update check in a thread and display the result."""
+        info = await asyncio.to_thread(check_for_updates)
+
+        if info.error:
+            self._add_system(Text(f"update check failed: {info.error}", style="bold red"))
+            return
+
+        if info.up_to_date:
+            self._add_system(Text("up to date — no updates available", style="cyan"))
+            return
+
+        # Behind — build the update message.
+        lines = [f"  {info.behind_count} commit(s) behind origin"]
+        for commit in info.new_commits[:10]:
+            lines.append(f"    {commit}")
+        if len(info.new_commits) > 10:
+            lines.append(f"    ...and {len(info.new_commits) - 10} more")
+        lines.append(f"\n  pull with: git pull")
+
+        self._add_system(Panel(
+            Text("\n".join(lines), style="yellow"),
+            title="updates available",
+            border_style="yellow",
+        ))
 
     def cmd_quit(self, _arg: str) -> None:
         self.exit()
@@ -1484,6 +1570,10 @@ class NyxApp(App):
         if self._doc_in_context:
             doc_part = Text(f"  docs: {self._doc_full_tokens}", style="magenta")
             status = Text.assemble(status, doc_part)
+        if self._code_mode:
+            status = Text.assemble(status, Text("  code: on", style="cyan"))
+        if self._tools_mode:
+            status = Text.assemble(status, Text("  tools: on", style="green"))
         dots = self._spinner_chars[self._spinner_idx]
         status = Text.assemble(
             Text(f"{dots}  ", style="cyan"),
@@ -1502,8 +1592,8 @@ class NyxApp(App):
         self._spinner_idx = (self._spinner_idx + 1) % len(self._spinner_chars)
         self._update_status()
         # Update thinking indicator only while waiting for first token.
-        if self._thinking and self._stream_widget is not None:
-            suffix = " [code mode]" if self._code_mode else ""
+        if self._thinking and self._stream_widget is not None and not self._thinking_text:
+            suffix = self._mode_suffix
             self._stream_widget.update(
                 Text.assemble(
                     Text("\n"),
@@ -1523,10 +1613,11 @@ class NyxApp(App):
         my_gen = self._stream_gen
         self._active_gen = my_gen
         self._auto_scroll = True
+        self._thinking_text = ""
 
         # Show thinking indicator.
         self._thinking = True
-        suffix = " [code mode]" if self._code_mode else ""
+        suffix = self._mode_suffix
         self._stream_widget = self._add_message(
             Text.assemble(
                 Text("\n"),
@@ -1547,6 +1638,11 @@ class NyxApp(App):
             self.convo.for_request, self.client, self._effective_context_limit
         )
 
+        # Tool-calling mode uses a non-streaming loop instead of streaming.
+        if self._tools_mode:
+            await self._stream_with_tools(messages, my_gen)
+            return
+
         current_text = ""
         result_holder: list = [None]
 
@@ -1558,7 +1654,10 @@ class NyxApp(App):
                 for token in token_iter:
                     if self._active_gen is not my_gen:
                         break
-                    if token.kind == "content":
+                    if token.kind == "thinking":
+                        self._thinking_text += token.text
+                        self.call_from_thread(self._update_thinking, self._thinking_text, my_gen)
+                    elif token.kind == "content":
                         current_text += token.text
                         self.call_from_thread(self._update_response, current_text, my_gen)
             else:
@@ -1612,6 +1711,115 @@ class NyxApp(App):
                 )
                 self._update_status()
 
+    async def _stream_with_tools(self, messages: list[dict], my_gen: int) -> None:
+        """Non-streaming tool-calling loop.
+
+        Calls the model with tool definitions, executes any tool calls,
+        feeds results back, and repeats until the model gives a final
+        answer (no tool calls) or max turns is reached.
+        """
+        tools = tool_registry.get_tool_definitions()
+        max_turns = 5
+
+        for turn in range(max_turns):
+            if self._active_gen is not my_gen:
+                return  # interrupted
+
+            # Non-streaming call with tools.
+            try:
+                msg, tool_calls = await asyncio.to_thread(
+                    self.client.chat_with_tools, messages, tools
+                )
+            except httpx.TimeoutException:
+                self._error_response(
+                    f"request timed out — is ollama responding? "
+                    f"(timeout: {self.config.request_timeout}s)",
+                    my_gen,
+                )
+                return
+            except Exception as e:
+                self._error_response(f"model error: {e}", my_gen)
+                return
+
+            if self._active_gen is not my_gen:
+                return  # interrupted during call
+
+            # Show thinking if the model produced any.
+            thinking = msg.get("thinking", "")
+            if thinking:
+                self._thinking_text = thinking
+                self._update_thinking(thinking, my_gen)
+
+            content = msg.get("content", "")
+            tool_calls = tool_calls or []
+
+            if not tool_calls:
+                # No tool calls — this is the final answer.
+                self._thinking = False
+                if content:
+                    self._update_response(content, my_gen)
+                    self.convo.add_assistant(content)
+                self._finalize_response(content, my_gen)
+                self._update_status()
+
+                # Auto-remove doc from context (same as regular _stream).
+                if self._doc_pending_removal:
+                    self._doc_pending_removal = False
+                    if self._doc_in_context:
+                        self._remove_doc_from_convo()
+                        self._add_system(
+                            Text("doc removed — use /followup <question> to query the doc again", style="dim")
+                        )
+                        self._update_status()
+                return
+
+            # ── execute tool calls ──
+
+            # Append the assistant message (with tool_calls) to conversation.
+            # Store a clean copy without the thinking field for context.
+            assistant_msg = {"role": "assistant", "content": content, "tool_calls": tool_calls}
+            messages.append(assistant_msg)
+
+            # Show tool calls in the UI.
+            tool_lines: list[str] = []
+            for tc in tool_calls:
+                fn_name = tc["function"]["name"]
+                fn_args = tc["function"]["arguments"]
+                if isinstance(fn_args, str):
+                    import json as _json
+                    try:
+                        fn_args = _json.loads(fn_args)
+                    except Exception:
+                        pass
+                args_str = ", ".join(f"{k}={v!r}" for k, v in fn_args.items())
+                tool_lines.append(f"  ⟶ {fn_name}({args_str})")
+
+                result = tool_registry.execute_tool(fn_name, fn_args)
+                tool_lines.append(f"  ⟵ {result}")
+
+                # Append tool result to conversation.
+                messages.append({"role": "tool", "name": fn_name, "content": result})
+
+            self._add_system(Text("\n".join(tool_lines), style="dim cyan"))
+
+            # Update thinking indicator for next round.
+            self._thinking = True
+            if self._stream_widget is not None:
+                self._stream_widget.update(
+                    Text.assemble(
+                        Text("\n"),
+                        Text("☾ ", style="cyan"),
+                        Text("NYX", style="bold cyan"),
+                        Text(self._mode_suffix, style="dim"),
+                        Text("\n"),
+                        Text("  thinking ", style="dim"),
+                        Text(self._spinner_chars[self._spinner_idx], style="cyan"),
+                    )
+                )
+
+        # Max turns reached.
+        self._error_response("stopped — max tool-call turns reached", my_gen)
+
     @staticmethod
     def _extract_code_blocks(text: str) -> str:
         """Extract all markdown fenced code blocks (including fences).
@@ -1654,7 +1862,7 @@ class NyxApp(App):
         """Build the assistant message content: header + markdown body."""
         chat = self.query_one("#chat-history", VerticalScroll)
         width = chat.content_size.width or 80
-        header_suffix = " [code mode]" if self._code_mode else ""
+        header_suffix = self._mode_suffix
         return Text.assemble(
             Text("\n"),
             Text("☾ ", style="cyan"),
@@ -1665,19 +1873,49 @@ class NyxApp(App):
             Text("\n"),
         )
 
+    def _update_thinking(self, text: str, gen: int | None = None) -> None:
+        """Update widget to show streaming thinking tokens."""
+        if gen is not None and self._active_gen is not gen:
+            return
+        if self._stream_widget is not None:
+            self._stream_widget.update(
+                Text.assemble(
+                    Text("\n"),
+                    Text("☾ ", style="cyan"),
+                    Text("NYX", style="bold cyan"),
+                    Text("\n\n"),
+                    Text(text, style="dim"),
+                    Text("\n"),
+                )
+            )
+            if self._auto_scroll:
+                chat = self.query_one("#chat-history", VerticalScroll)
+                chat.scroll_end(animate=False)
+
     def _update_response(self, text: str, gen: int | None = None) -> None:
         if gen is not None and self._active_gen is not gen:
             return
         if self._stream_widget is not None:
+            self._thinking = False
             if self._code_mode:
                 code_text = self._extract_code_blocks(text)
                 if not code_text:
                     return  # Keep thinking indicator until code arrives.
-                self._thinking = False
-                self._stream_widget.update(self._assistant_code_text(code_text))
+                content = self._assistant_code_text(code_text)
             else:
-                self._thinking = False
-                self._stream_widget.update(self._assistant_text(text))
+                content = self._assistant_text(text)
+
+            if self._thinking_text:
+                self._stream_widget.update(
+                    Text.assemble(
+                        Text(self._thinking_text, style="dim"),
+                        Text("\n\n───\n\n", style="dim"),
+                        content,
+                    )
+                )
+            else:
+                self._stream_widget.update(content)
+
             if self._auto_scroll:
                 chat = self.query_one("#chat-history", VerticalScroll)
                 chat.scroll_end(animate=False)
@@ -1698,7 +1936,17 @@ class NyxApp(App):
         if gen is not None and self._active_gen is not gen:
             return
         if self._stream_widget is not None:
-            self._stream_widget.update(self._assistant_text(text))
+            content = self._assistant_text(text)
+            if self._thinking_text:
+                self._stream_widget.update(
+                    Text.assemble(
+                        Text(self._thinking_text, style="dim"),
+                        Text("\n\n───\n\n", style="dim"),
+                        content,
+                    )
+                )
+            else:
+                self._stream_widget.update(content)
             self._stream_widget = None
         self._active_gen = None
         self.query_one("#chat-input", NyxInput).focus()

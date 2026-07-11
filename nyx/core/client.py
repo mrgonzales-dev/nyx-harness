@@ -133,6 +133,28 @@ class OllamaClient:
 
         return _gen(), result
 
+    def chat_with_tools(
+        self, messages: list[dict], tools: list[dict]
+    ) -> tuple[dict, list[dict]]:
+        """Non-streaming chat call with tool definitions.
+
+        Returns (message_dict, tool_calls) where *message_dict* has
+        ``role``, ``content``, and optionally ``thinking`` keys.
+        *tool_calls* is a list of tool-call dicts (possibly empty).
+        """
+        resp = self._client.chat(
+            model=self.config.model,
+            messages=messages,
+            tools=tools,
+            stream=False,
+            options=self._chat_options(temperature=self.config.temperature),
+        )
+        if not isinstance(resp, dict):
+            resp = resp.model_dump()
+        msg = resp.get("message", {})
+        tool_calls = msg.get("tool_calls", [])
+        return msg, tool_calls
+
     def summarize(self, messages: list[dict]) -> str:
         """Non-streaming call to summarize old conversation turns."""
         resp = self._client.chat(
