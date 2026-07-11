@@ -11,15 +11,18 @@ from __future__ import annotations
 import json
 
 from nyx.tools import calculator
+from nyx.tools import doc_search
 
 # Map tool name -> callable.
 TOOL_FUNCS: dict[str, callable] = {
     "calculate": calculator.calculate,
+    "search_docs": doc_search.search_docs,
 }
 
 # Map tool name -> Ollama tool definition dict.
 TOOL_DEFS: list[dict] = [
     calculator.TOOL_DEF,
+    doc_search.TOOL_DEF,
 ]
 
 

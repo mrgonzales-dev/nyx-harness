@@ -759,8 +759,6 @@ class NyxApp(App):
         self.set_interval(0.12, self._tick_spinner)
         # Pre-populate model cache in a worker so the suggester doesn't block.
         self.run_worker(self._warm_model_cache(), name="warm-models")
-        # Background update check — shows a toast if behind.
-        self.run_worker(self._do_update_check(startup=True), name="startup-update")
 
     async def _warm_model_cache(self) -> None:
         """Fetch model list in the background to avoid suggester blocking."""
